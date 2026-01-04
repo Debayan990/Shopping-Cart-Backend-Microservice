@@ -2,6 +2,7 @@ package com.cts.controllers;
 
 import com.cts.dtos.InventoryDto;
 import com.cts.dtos.SuccessResponse;
+import com.cts.security.JwtTokenProvider; // Import required for security mocking
 import com.cts.service.InventoryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +34,10 @@ class InventoryControllerTest {
     @MockitoBean
     private InventoryService inventoryService;
 
+    // FIX: Mock the JwtTokenProvider to bypass real JWT validation (Fixes 401 error)
+    @MockitoBean
+    private JwtTokenProvider jwtTokenProvider;
+
     @Autowired
     private ObjectMapper objectMapper;      // ObjectMapper helps convert our Java objects to JSON strings for the request body
 
@@ -42,6 +47,12 @@ class InventoryControllerTest {
     void init() {
         // This runs before each test to set up our test data
         inventoryDto = new InventoryDto(1L, 101L, 50, "A1-North", LocalDateTime.now());
+
+        // FIX: Stub the JWT Provider to accept our dummy "token"
+        when(jwtTokenProvider.validateToken(anyString())).thenReturn(true);
+        when(jwtTokenProvider.getUsername(anyString())).thenReturn("admin");
+        // Ensure the user has ROLE_ADMIN and ROLE_SYSTEM to pass @PreAuthorize checks
+        when(jwtTokenProvider.getRoles(anyString())).thenReturn(List.of("ROLE_ADMIN", "ROLE_SYSTEM"));
     }
 
     @Test
@@ -49,6 +60,18 @@ class InventoryControllerTest {
         when(inventoryService.addInventory(any(InventoryDto.class))).thenReturn(inventoryDto);
 
         mockMvc.perform(post("/api/inventory")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(inventoryDto))
+                        .header("Authorization", "Bearer token"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.itemId").value(101L));
+    }
+
+    @Test
+    void addInventoryInternal() throws Exception { //It Should Return 201_Created (System role)
+        when(inventoryService.addInventoryInternal(any(InventoryDto.class))).thenReturn(inventoryDto);
+
+        mockMvc.perform(post("/api/inventory/internal")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(inventoryDto))
                         .header("Authorization", "Bearer token"))
@@ -74,7 +97,8 @@ class InventoryControllerTest {
         when(inventoryService.getAllInventory()).thenReturn(List.of(inventoryDto));
 
 
-        mockMvc.perform(get("/api/inventory"))
+        mockMvc.perform(get("/api/inventory")
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.size()").value(1))
                 .andExpect(jsonPath("$[0].warehouseLocation").value("A1-North"));
@@ -85,9 +109,20 @@ class InventoryControllerTest {
         when(inventoryService.getInventoryById(1L)).thenReturn(inventoryDto);
 
 
-        mockMvc.perform(get("/api/inventory/{id}", 1L))
+        mockMvc.perform(get("/api/inventory/{id}", 1L)
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1L));
+    }
+
+    @Test
+    void getInventoryByItemId() throws Exception {  //It Should Return 200_OK
+        when(inventoryService.getInventoryByItemId(101L)).thenReturn(inventoryDto);
+
+        mockMvc.perform(get("/api/inventory/item/{itemId}", 101L)
+                        .header("Authorization", "Bearer token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.itemId").value(101L));
     }
 
     @Test

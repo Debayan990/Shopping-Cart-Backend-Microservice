@@ -2,6 +2,7 @@ package com.cts.service;
 
 import com.cts.dtos.InventoryDto;
 import com.cts.entities.Inventory;
+import com.cts.exception.BadRequestException;
 import com.cts.exception.ResourceNotFoundException;
 import com.cts.repository.InventoryRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,7 +53,11 @@ class InventoryServiceImplTest {
 
     @Test
     void addInventory() {
+        // Mock validations
         doNothing().when(itemValidationService).validateItemId(anyLong());
+        // FIX: Check if inventory already exists for this item (Must return empty to succeed)
+        when(inventoryRepository.findByItemId(101L)).thenReturn(Optional.empty());
+
         when(modelMapper.map(any(InventoryDto.class), eq(Inventory.class))).thenReturn(inventory1);
         when(inventoryRepository.save(any(Inventory.class))).thenReturn(inventory1);
         when(modelMapper.map(any(Inventory.class), eq(InventoryDto.class))).thenReturn(inventoryDto1);
@@ -62,8 +67,43 @@ class InventoryServiceImplTest {
 
         assertNotNull(createdInventory);
         assertEquals(101L, createdInventory.getItemId());
-        verify(inventoryRepository).save(any(Inventory.class));
+
         verify(itemValidationService).validateItemId(101L);
+        verify(inventoryRepository).findByItemId(101L);
+        verify(inventoryRepository).save(any(Inventory.class));
+        verify(auditService).logEvent(eq("CREATE"), eq(1L), anyString());
+    }
+
+    @Test
+    void addInventory_AlreadyExists() {
+        // Mock validations
+        doNothing().when(itemValidationService).validateItemId(anyLong());
+        // FIX: Mock findByItemId to return an existing inventory to trigger exception
+        when(inventoryRepository.findByItemId(101L)).thenReturn(Optional.of(inventory1));
+
+        assertThrows(BadRequestException.class, () -> inventoryService.addInventory(inventoryDto1));
+
+        verify(inventoryRepository, never()).save(any(Inventory.class));
+    }
+
+    @Test
+    void addInventoryInternal() {
+        // Internal add does NOT call external item validation, but DOES check for duplicates
+        when(inventoryRepository.findByItemId(101L)).thenReturn(Optional.empty());
+
+        when(modelMapper.map(any(InventoryDto.class), eq(Inventory.class))).thenReturn(inventory1);
+        when(inventoryRepository.save(any(Inventory.class))).thenReturn(inventory1);
+        when(modelMapper.map(any(Inventory.class), eq(InventoryDto.class))).thenReturn(inventoryDto1);
+        doNothing().when(auditService).logEvent(anyString(), anyLong(), anyString());
+
+        InventoryDto createdInventory = inventoryService.addInventoryInternal(inventoryDto1);
+
+        assertNotNull(createdInventory);
+        assertEquals(101L, createdInventory.getItemId());
+
+        // Verify itemValidationService was NOT called (Specific to Internal method)
+        verify(itemValidationService, never()).validateItemId(anyLong());
+        verify(inventoryRepository).save(any(Inventory.class));
         verify(auditService).logEvent(eq("CREATE"), eq(1L), anyString());
     }
 
@@ -85,6 +125,18 @@ class InventoryServiceImplTest {
 
         assertThrows(ResourceNotFoundException.class, () -> inventoryService.getInventoryById(99L));
         verify(inventoryRepository).findById(99L);      //verify that the service tried to find the item
+    }
+
+    @Test
+    void getInventoryByItemId() {
+        when(inventoryRepository.findByItemId(101L)).thenReturn(Optional.of(inventory1));
+        when(modelMapper.map(any(Inventory.class), eq(InventoryDto.class))).thenReturn(inventoryDto1);
+
+        var result = inventoryService.getInventoryByItemId(101L);
+
+        assertNotNull(result);
+        assertEquals(50, result.getQuantity());
+        verify(inventoryRepository).findByItemId(101L);
     }
 
     @Test
