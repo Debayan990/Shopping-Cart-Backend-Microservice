@@ -2,6 +2,7 @@ package com.cts.controllers;
 
 import com.cts.dtos.NotificationDto;
 import com.cts.dtos.SuccessResponse;
+import com.cts.security.JwtTokenProvider;
 import com.cts.service.NotificationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +18,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -27,79 +29,81 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class NotificationControllerTest {
 
     @Autowired
-    private MockMvc mockMvc;       // A tool to simulate sending HTTP requests to the controller.
+    private MockMvc mockMvc;
 
-    // Creates a mock of the service layer to isolate the controller.
     @MockitoBean
     private NotificationService notificationService;
 
+    // FIX: Mock JwtTokenProvider to handle Authentication injection and avoid 401
+    @MockitoBean
+    private JwtTokenProvider jwtTokenProvider;
+
     @Autowired
-    private ObjectMapper objectMapper;      // A helper for converting Java objects to JSON.
+    private ObjectMapper objectMapper;
 
     private NotificationDto notificationDto;
 
-    // This method runs before each test to prepare fresh test data.
     @BeforeEach
     void init() {
         notificationDto = new NotificationDto(1L, "LowStock", "test@example.com", "Stock is low", LocalDateTime.now());
+
+        // FIX: Stub JWT validation to allow the Security Filter to create Authentication
+        when(jwtTokenProvider.validateToken(anyString())).thenReturn(true);
+        when(jwtTokenProvider.getUsername(anyString())).thenReturn("admin");
+        when(jwtTokenProvider.getRoles(anyString())).thenReturn(List.of("ROLE_ADMIN", "ROLE_SYSTEM"));
     }
 
     @Test
-    void sendNotification() throws Exception {      //It Should Return 201_Created
-        // Define the mock service's behavior for this test.
+    void sendNotification() throws Exception {
         when(notificationService.sendNotification(any(NotificationDto.class))).thenReturn(notificationDto);
 
-        // Perform a POST request and check the HTTP response.
         mockMvc.perform(post("/api/notifications")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(notificationDto)))
-                .andExpect(status().isCreated())     // Assert that the status code is 201 CREATED.
-                .andExpect(jsonPath("$.recipient").value("test@example.com"));    // Assert that the JSON response body contains the correct recipient.
+                        .content(objectMapper.writeValueAsString(notificationDto))
+                        .header("Authorization", "Bearer token"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.recipient").value("test@example.com"));
     }
 
     @Test
-    void getNotificationById() throws Exception {     //Should Return 200_OK
-        // Tell the mock what to return when getNotificationById is called.
+    void getNotificationById() throws Exception {
         when(notificationService.getNotificationById(1L)).thenReturn(notificationDto);
 
-        // Perform a GET request and check the response.
-        mockMvc.perform(get("/api/notifications/{id}", 1L))
+        mockMvc.perform(get("/api/notifications/{id}", 1L)
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1L));
     }
 
     @Test
-    void getAllNotifications() throws Exception {     //Should Return 200_OK
-        // Arrange: Mock the service to return a list of notifications.
+    void getAllNotifications() throws Exception {
         when(notificationService.getAllNotifications()).thenReturn(List.of(notificationDto));
 
-        // Act & Assert: Perform a GET request and check that the response is a list.
-        mockMvc.perform(get("/api/notifications"))
+        mockMvc.perform(get("/api/notifications")
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.size()").value(1)); // Check that the list contains one item.
+                .andExpect(jsonPath("$.size()").value(1));
     }
 
     @Test
-    void updateNotification() throws Exception {     //Should Return 200_OK
-        // Arrange: Define the mock's behavior for the update operation.
+    void updateNotification() throws Exception {
         when(notificationService.updateNotification(eq(1L), any(NotificationDto.class))).thenReturn(notificationDto);
 
-        // Act & Assert: Perform a PUT request and check the response.
         mockMvc.perform(put("/api/notifications/{id}", 1L)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(notificationDto)))
+                        .content(objectMapper.writeValueAsString(notificationDto))
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.message").value("Stock is low"));
     }
 
     @Test
-    void deleteNotification() throws Exception {     //Should Return 200_OK
-
+    void deleteNotification() throws Exception {
         SuccessResponse successMessage = new SuccessResponse("Notification with ID 1 deleted successfully.");
         when(notificationService.deleteNotification(1L)).thenReturn(successMessage.getMessage());
 
-        //Perform a DELETE request and check the response body.
-        mockMvc.perform(delete("/api/notifications/{id}", 1L))
+        mockMvc.perform(delete("/api/notifications/{id}", 1L)
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.message").value("Notification with ID 1 deleted successfully."));
     }
