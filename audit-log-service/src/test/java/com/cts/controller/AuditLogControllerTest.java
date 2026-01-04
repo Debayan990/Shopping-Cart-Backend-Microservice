@@ -2,6 +2,7 @@ package com.cts.controller;
 
 import com.cts.dtos.AuditLogDto;
 import com.cts.dtos.SuccessResponse;
+import com.cts.security.JwtTokenProvider;
 import com.cts.service.AuditLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,8 +17,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDateTime;
 import java.util.List;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -27,73 +27,83 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AuditLogControllerTest {
 
     @Autowired
-    private MockMvc mockMvc;     // A tool to simulate sending HTTP requests to the controller.
+    private MockMvc mockMvc;
 
-    // Creates a mock of the service layer to isolate the controller.
     @MockitoBean
     private AuditLogService auditLogService;
 
+    @MockitoBean
+    private JwtTokenProvider jwtTokenProvider;
+
     @Autowired
-    private ObjectMapper objectMapper;      // A helper for converting Java objects to JSON.
+    private ObjectMapper objectMapper;
 
     private AuditLogDto auditLogDto;
 
-    // Runs before each test to prepare the test data.
     @BeforeEach
     void init() {
-        auditLogDto = new AuditLogDto(1L, "Item-Service", "CREATE", 101L, LocalDateTime.now(), "Item created");
+        // Fix: Ensure all 7 arguments are provided
+        // (Id, ServiceName, Operation, RecordId, Timestamp, Details, PerformedBy)
+        auditLogDto = new AuditLogDto(1L, "ITEM-SERVICE", "CREATE", 101L, LocalDateTime.now(), "Details", "admin");
+
+        // Mock Security
+        when(jwtTokenProvider.validateToken(anyString())).thenReturn(true);
+        when(jwtTokenProvider.getUsername(anyString())).thenReturn("admin");
+        when(jwtTokenProvider.getRoles(anyString())).thenReturn(List.of("ROLE_ADMIN", "ROLE_SYSTEM"));
     }
 
     @Test
-    void logEvent() throws Exception {      //Should Return 201_Created
-        // Define mock service behavior for logging an event.
+    void logEvent() throws Exception {
         when(auditLogService.logEvent(any(AuditLogDto.class))).thenReturn(auditLogDto);
 
-        // Perform POST request and check the response.
         mockMvc.perform(post("/api/logs")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(auditLogDto)))
+                        .content(objectMapper.writeValueAsString(auditLogDto))
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.serviceName").value("Item-Service"));
+                .andExpect(jsonPath("$.serviceName").value("ITEM-SERVICE"));
     }
 
     @Test
-    void getLogById() throws Exception {     //Should Return 200_OK
+    void getLogById() throws Exception {
         when(auditLogService.getLogById(1L)).thenReturn(auditLogDto);
 
-        mockMvc.perform(get("/api/logs/{id}", 1L))
+        mockMvc.perform(get("/api/logs/{id}", 1L)
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1L));
     }
 
     @Test
-    void getAllLogs() throws Exception {      //Should Return 200_OK
-        // Mock the service to return a list of logs.
+    void getAllLogs() throws Exception {
         when(auditLogService.getAllLogs()).thenReturn(List.of(auditLogDto));
 
-        // Perform GET request and check for a list in the response.
-        mockMvc.perform(get("/api/logs"))
+        mockMvc.perform(get("/api/logs")
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.size()").value(1));
+                .andExpect(jsonPath("$.size()").value(1))
+                .andExpect(jsonPath("$[0].operation").value("CREATE"));
     }
 
     @Test
-    void updateLog() throws Exception {     //Should Return 200_OK
+    void updateLog() throws Exception {
         when(auditLogService.updateLog(eq(1L), any(AuditLogDto.class))).thenReturn(auditLogDto);
 
         mockMvc.perform(put("/api/logs/{id}", 1L)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(auditLogDto)))
+                        .content(objectMapper.writeValueAsString(auditLogDto))
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.operation").value("CREATE"));
+                .andExpect(jsonPath("$.serviceName").value("ITEM-SERVICE"));
     }
 
     @Test
-    void deleteLog() throws Exception {     //Should Return 200_OK
-        SuccessResponse successMessage = new SuccessResponse("AuditLog with ID 1 deleted successfully.");
-        when(auditLogService.deleteLog(1L)).thenReturn(successMessage.getMessage());
+    void deleteLog() throws Exception {
+        SuccessResponse response = new SuccessResponse("AuditLog with ID 1 deleted successfully.");
+        when(auditLogService.deleteLog(1L)).thenReturn(response.getMessage());
 
-        mockMvc.perform(delete("/api/logs/{id}", 1L))
+        mockMvc.perform(delete("/api/logs/{id}", 1L)
+                        .header("Authorization", "Bearer token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.message").value("AuditLog with ID 1 deleted successfully."));
     }
